@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSH 원격 파일 뷰어 (WebSocket)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 추가적인 커스텀 스타일 */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .modal-backdrop {
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        .modal {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            max-height: 90vh; /* 모달 최대 높이 제한 */
+        }
+        /* 스크롤바 스타일링 */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #2d3748; /* bg-gray-800 */
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #4a5568; /* bg-gray-600 */
+            border-radius: 4px;
+        }
+        
+        /* [수정] 다크모드 폼 스타일 (@apply -> 표준 CSS로 변경) */
+        .form-input-dark {
+            margin-top: 0.25rem; /* mt-1 */
+            display: block; /* block */
+            width: 100%; /* w-full */
+            border: 1px solid #4a5568; /* border border-gray-600 */
+            background-color: #374151; /* bg-gray-700 */
+            color: #ffffff; /* text-white */
+            border-radius: 0.375rem; /* rounded-md */
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* shadow-sm */
+            padding-top: 0.5rem; /* py-2 */
+            padding-bottom: 0.5rem; /* py-2 */
+            padding-left: 0.75rem; /* px-3 */
+            padding-right: 0.75rem; /* px-3 */
+        }
+        .form-input-dark:focus {
+            outline: none; /* focus:outline-none */
+            /* focus:ring-blue-500 (Tailwind's ring is usually a box-shadow) */
+            box-shadow: 0 0 0 2px #3b82f6; /* focus:ring-blue-500 (approximation) */
+            border-color: #3b82f6; /* focus:border-blue-500 */
+        }
+        .form-input-dark::placeholder {
+            color: #9ca3af; /* placeholder-gray-400 */
+        }
+
+        .form-select-dark {
+            margin-top: 0.25rem; /* mt-1 */
+            display: block; /* block */
+            width: 100%; /* w-full */
+            border: 1px solid #4a5568; /* border border-gray-600 */
+            background-color: #374151; /* bg-gray-700 */
+            color: #ffffff; /* text-white */
+            border-radius: 0.375rem; /* rounded-md */
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* shadow-sm */
+            padding-top: 0.5rem; /* py-2 */
+            padding-bottom: 0.5rem; /* py-2 */
+            padding-left: 0.75rem; /* px-3 */
+            /* -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none; */
+            /* Tailwind의 form-select는 기본 OS 스타일을 사용하거나
+               @tailwindcss/forms 플러그인이 필요합니다.
+               여기서는 기본 OS 스타일을 사용하도록 appearance: auto (기본값)로 둡니다.
+               배경색과 텍스트 색상만 다크 모드에 맞게 조정됩니다.
+               만약 커스텀 화살표가 필요하다면 아래 주석을 해제하고 background-image를 추가해야 합니다.
+            */
+        }
+        .form-select-dark:focus {
+            outline: none; /* focus:outline-none */
+            box-shadow: 0 0 0 2px #3b82f6; /* focus:ring-blue-500 (approximation) */
+            border-color: #3b82f6; /* focus:border-blue-500 */
+        }
+
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200">
+
+    <!-- 메인 컨테이너 -->
+    <div class="container mx-auto p-4 md:p-8">
+        <!-- 헤더 로고 및 정렬 -->
+        <header class="mb-8 flex items-center space-x-4">
+            <!-- 로고 이미지 (경로는 실제 이미지 위치에 맞게 조정하세요) -->
+            <img src="goatnam_logo.jpg" alt="Goatnam Logo" class="h-16 w-16 rounded-lg bg-blue-600">
+            <div>
+                <h1 class="text-3xl font-bold text-white">SSH 원격 파일 뷰어</h1>
+                <p class="text-gray-400 mt-1">프로필을 선택하여 원격 서버의 파일 내용을 실시간으로 조회합니다.</p>
+            </div>
+        </header>
+
+        <main class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- 왼쪽: 프로필 관리 패널 -->
+            <div class="lg:col-span-1 bg-gray-800 border border-gray-700 p-6 rounded-lg shadow-md flex flex-col h-full">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-white">프로필 목록</h2>
+                    <button id="add-profile-btn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition duration-300 text-sm font-medium">
+                        + 새 프로필 추가
+                    </button>
+                </div>
+                
+                <!-- 전체 선택 체크박스 -->
+                <div class="flex items-center mb-3 pb-3 border-b border-gray-700">
+                    <input type="checkbox" id="select-all-checkbox" class="h-5 w-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500">
+                    <label for="select-all-checkbox" class="ml-3 text-sm font-medium text-gray-300">전체 선택</label>
+                </div>
+
+                <div id="profiles-list" class="space-y-3 flex-grow overflow-y-auto pr-2 min-h-[300px]">
+                    <!-- 프로필 목록이 여기에 동적으로 렌더링됩니다. -->
+                    <p class="text-gray-400 text-center py-4">프로필을 불러오는 중...</p>
+                </div>
+                <div class="mt-6">
+                    <button id="execute-btn" class="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition duration-300 font-bold text-lg disabled:bg-green-400 disabled:cursor-not-allowed">
+                        일괄 가져오기
+                    </button>
+                </div>
+            </div>
+
+            <!-- 오른쪽: 결과 및 템플릿 패널 -->
+            <div class="lg:col-span-2 space-y-8">
+                <!-- 결과 표시 패널 (Accordion) -->
+                <div class="bg-gray-800 border border-gray-700 p-6 rounded-lg shadow-md">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-semibold text-white">실시간 실행 결과 (편집 가능)</h2>
+                        <div>
+                            <button id="clear-btn" class="bg-gray-600 text-gray-100 px-4 py-2 rounded-lg hover:bg-gray-700 transition duration-300 text-sm mr-2">결과창 초기화</button>
+                            <button id="download-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition duration-300 text-sm">결합 다운로드</button>
+                        </div>
+                    </div>
+                    <!-- 아코디언 컨테이너 -->
+                    <div id="output-accordion-container" class="space-y-2">
+                        <p class="text-gray-400 text-center py-4">실행 대기 중...</p>
+                    </div>
+                    <!-- 임의 항목 추가 버튼 -->
+                    <div class="mt-4">
+                        <button id="add-custom-item-btn" class="w-full bg-gray-600 text-white py-2 rounded-lg hover:bg-gray-700 transition duration-300 text-sm font-medium">
+                            + 임의 항목 추가
+                        </button>
+                    </div>
+                </div>
+                 <!-- 템플릿 관리 패널 -->
+                <div class="bg-gray-800 border border-gray-700 p-6 rounded-lg shadow-md">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-semibold text-white">초기화 템플릿 관리 (template.txt)</h2>
+                        <button id="save-template-btn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition duration-300 text-sm">템플릿 저장</button>
+                    </div>
+                    <textarea id="template-content" rows="5" class="w-full p-3 border border-gray-600 bg-gray-700 text-white rounded-md font-mono text-sm focus:ring-blue-500 focus:border-blue-500 placeholder-gray-400" placeholder="초기화 시 사용될 템플릿 내용을 입력하세요."></textarea>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 프로필 추가/수정 모달 -->
+    <div id="profile-modal" class="fixed inset-0 flex items-center justify-center modal-backdrop hidden z-50">
+        <!-- 다크모드 모달 -->
+        <div class="modal bg-gray-800 text-gray-200 rounded-lg shadow-xl w-full max-w-lg m-4 transform scale-95 opacity-0 overflow-y-auto custom-scrollbar">
+            <div class="p-6 border-b border-gray-700">
+                <h3 id="modal-title" class="text-xl font-semibold text-white">새 프로필 추가</h3>
+            </div>
+            <!-- 모달 컨텐츠 스크롤 영역 -->
+            <div class="p-6 space-y-4">
+                <input type="hidden" id="profile-id">
+                
+                <!-- 기본 정보 -->
+                <div>
+                    <label for="profile-name" class="block text-sm font-medium text-gray-300">프로필 이름</label>
+                    <input type="text" id="profile-name" placeholder="예: 개발 서버 로그" class="form-input-dark" autocomplete="off">
+                </div>
+                <div>
+                    <label for="profile-sshInfo" class="block text-sm font-medium text-gray-300">대상 SSH 정보 (user@host)</label>
+                    <input type="text" id="profile-sshInfo" placeholder="user@target-server.com" class="form-input-dark" autocomplete="off">
+                </div>
+                <div>
+                    <label for="profile-authType" class="block text-sm font-medium text-gray-300">대상 인증 방식</label>
+                    <select id="profile-authType" class="form-select-dark">
+                        <option value="password">비밀번호</option>
+                        <option value="key">SSH 키</option>
+                    </select>
+                </div>
+                <div id="profile-password-group">
+                    <label for="profile-password" class="block text-sm font-medium text-gray-300">대상 비밀번호</label>
+                    <input type="password" id="profile-password" class="form-input-dark" autocomplete="new-password">
+                </div>
+                <div id="profile-key-group" class="hidden">
+                    <label for="profile-keyPath" class="block text-sm font-medium text-gray-300">대상 Private Key 파일 경로 (서버 기준)</label>
+                    <input type="text" id="profile-keyPath" placeholder="예: /home/user/.ssh/id_rsa_target" class="form-input-dark" autocomplete="off">
+                </div>
+
+                <!-- 조회 경로 (섹션 구분) -->
+                <div class="border-t border-gray-700 pt-4 mt-4">
+                    <label for="profile-path" class="block text-sm font-medium text-gray-300">조회 경로 (쉼표로 구분)</label>
+                    <input type="text" id="profile-path" placeholder="/var/log/app.log, /home/config.yml" class="form-input-dark" autocomplete="off">
+                </div>
+                <div>
+                    <label for="profile-exclude" class="block text-sm font-medium text-gray-300">제외 경로 (쉼표로 구분)</label>
+                    <input type="text" id="profile-exclude" placeholder="*.tmp, .git/*" class="form-input-dark" autocomplete="off">
+                </div>
+
+                <!-- 터널링 섹션 -->
+                <div class="border-t border-gray-700 pt-4 mt-4">
+                    <div class="flex items-center">
+                        <input type="checkbox" id="profile-use-tunnel" class="h-5 w-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500">
+                        <label for="profile-use-tunnel" class="ml-3 text-sm font-medium text-gray-300">SSH 터널(점프 호스트) 사용</label>
+                    </div>
+                </div>
+                
+                <div id="profile-tunnel-options" class="hidden space-y-4 pl-8 border-l-2 border-gray-600 ml-2">
+                     <div>
+                        <label for="profile-tunnel-sshInfo" class="block text-sm font-medium text-gray-300">터널 SSH 정보 (user@host)</label>
+                        <input type="text" id="profile-tunnel-sshInfo" placeholder="user@jump-server.com" class="form-input-dark" autocomplete="off">
+                    </div>
+                    <div>
+                        <label for="profile-tunnel-authType" class="block text-sm font-medium text-gray-300">터널 인증 방식</label>
+                        <select id="profile-tunnel-authType" class="form-select-dark">
+                            <option value="password">비밀번호</option>
+                            <option value="key">SSH 키</option>
+                        </select>
+                    </div>
+                    <div id="profile-tunnel-password-group">
+                        <label for="profile-tunnel-password" class="block text-sm font-medium text-gray-300">터널 비밀번호</label>
+                        <input type="password" id="profile-tunnel-password" class="form-input-dark" autocomplete="new-password">
+                    </div>
+                    <div id="profile-tunnel-key-group" class="hidden">
+                        <label for="profile-tunnel-keyPath" class="block text-sm font-medium text-gray-300">터널 Private Key 파일 경로 (서버 기준)</Flabel>
+                        <input type="text" id="profile-tunnel-keyPath" placeholder="예: /home/user/.ssh/id_rsa_jump" class="form-input-dark" autocomplete="off">
+                    </div>
+                </div>
+
+            </div>
+            <!-- 다크모드 모달 푸터 -->
+            <div class="p-4 bg-gray-700 border-t border-gray-600 flex justify-end space-x-2">
+                <button id="cancel-modal-btn" class="px-4 py-2 bg-gray-600 text-gray-100 rounded-md hover:bg-gray-500">취소</button>
+                <button id="save-profile-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 알림 모달 -->
+    <div id="alert-modal" class="fixed inset-0 flex items-center justify-center modal-backdrop hidden z-[100]">
+        <!-- 다크모드 알림 -->
+        <div class="modal bg-gray-800 rounded-lg shadow-xl w-full max-w-sm m-4 transform scale-95 opacity-0">
+            <div class="p-6">
+                <h3 id="alert-title" class="text-lg font-medium text-white">알림</h3>
+                <p id="alert-message" class="mt-2 text-sm text-gray-300">메시지 내용</p>
+            </div>
+            <div class="p-4 bg-gray-700 border-t border-gray-600 flex justify-end">
+                <button id="alert-ok-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">확인</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- 전역 상태 및 DOM 요소 ---
+            let profiles = [];
+            let ws; // WebSocket 인스턴스
+            const profilesListEl = document.getElementById('profiles-list');
+            const addProfileBtn = document.getElementById('add-profile-btn');
+            const executeBtn = document.getElementById('execute-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const downloadBtn = document.getElementById('download-btn');
+            const templateContentEl = document.getElementById('template-content');
+            const saveTemplateBtn = document.getElementById('save-template-btn');
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            const outputAccordionContainer = document.getElementById('output-accordion-container');
+            
+            // [신규] 임의 항목 추가 버튼
+            const addCustomItemBtn = document.getElementById('add-custom-item-btn');
+            
+            // 모달 DOM 요소
+            const modal = document.getElementById('profile-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const saveProfileBtn = document.getElementById('save-profile-btn');
+            const cancelModalBtn = document.getElementById('cancel-modal-btn');
+            
+            // 프로필 입력 필드 (대상)
+            const profileIdInput = document.getElementById('profile-id');
+            const profileNameInput = document.getElementById('profile-name');
+            const profileSshInfoInput = document.getElementById('profile-sshInfo');
+            const profileAuthTypeSelect = document.getElementById('profile-authType');
+            const profilePasswordGroup = document.getElementById('profile-password-group');
+            const profilePasswordInput = document.getElementById('profile-password');
+            const profileKeyGroup = document.getElementById('profile-key-group');
+            const profileKeyPathInput = document.getElementById('profile-keyPath');
+            const profilePathInput = document.getElementById('profile-path');
+            const profileExcludeInput = document.getElementById('profile-exclude');
+
+            // 프로필 입력 필드 (터널)
+            const profileUseTunnelCheckbox = document.getElementById('profile-use-tunnel');
+            const profileTunnelOptions = document.getElementById('profile-tunnel-options');
+            const profileTunnelSshInfoInput = document.getElementById('profile-tunnel-sshInfo');
+            const profileTunnelAuthTypeSelect = document.getElementById('profile-tunnel-authType');
+            const profileTunnelPasswordGroup = document.getElementById('profile-tunnel-password-group');
+            const profileTunnelPasswordInput = document.getElementById('profile-tunnel-password');
+            const profileTunnelKeyGroup = document.getElementById('profile-tunnel-key-group');
+            const profileTunnelKeyPathInput = document.getElementById('profile-tunnel-keyPath');
+
+            // 알림 모달 DOM 요소
+            const alertModal = document.getElementById('alert-modal');
+            const alertTitle = document.getElementById('alert-title');
+            const alertMessage = document.getElementById('alert-message');
+            const alertOkBtn = document.getElementById('alert-ok-btn');
+
+            // --- 알림 모달 함수 ---
+            const showAlert = (message, title = '알림') => {
+                alertTitle.textContent = title;
+                alertMessage.textContent = message;
+                alertModal.classList.remove('hidden');
+                setTimeout(() => alertModal.querySelector('.modal').classList.remove('scale-95', 'opacity-0'), 10);
+            };
+            const closeAlert = () => {
+                alertModal.querySelector('.modal').classList.add('scale-95', 'opacity-0');
+                setTimeout(() => alertModal.classList.add('hidden'), 300);
+            };
+            alertOkBtn.addEventListener('click', closeAlert);
+
+            // --- WebSocket 초기화 ---
+            const initWebSocket = () => {
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+
+                ws.onopen = () => {
+                    console.log('WebSocket 연결 성공');
+                    executeBtn.disabled = false;
+                };
+
+                ws.onmessage = handleWebSocketMessage;
+
+                ws.onclose = () => {
+                    console.log('WebSocket 연결 종료. 3초 후 재연결 시도...');
+                    executeBtn.disabled = true;
+                    setTimeout(initWebSocket, 3000);
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket 오류:', error);
+                    executeBtn.disabled = true;
+                };
+            };
+
+            // --- API 호출 함수 (프로필, 템플릿) ---
+            const fetchProfiles = async () => {
+                try {
+                    const response = await fetch('/api/profiles');
+                    if (!response.ok) throw new Error('프로필 로딩 실패');
+                    profiles = await response.json();
+                    renderProfiles();
+                } catch (error) {
+                    console.error(error);
+                    profilesListEl.innerHTML = `<p class="text-red-400 text-center py-4">프로필을 불러오는 데 실패했습니다.</p>`;
+                }
+            };
+            
+            const fetchTemplate = async () => {
+                try {
+                    const response = await fetch('/api/template');
+                    if (!response.ok) throw new Error('템플릿 로딩 실패');
+                    templateContentEl.value = await response.text();
+                } catch (error) {
+                    console.error(error);
+                    templateContentEl.value = '템플릿을 불러오는 데 실패했습니다.';
+                }
+            };
+
+            const saveProfiles = async () => {
+                try {
+                    const response = await fetch('/api/profiles', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(profiles)
+                    });
+                    if (!response.ok) throw new Error('프로필 저장 실패');
+                } catch (error) {
+                    console.error(error);
+                    showAlert('프로필 저장에 실패했습니다.', '오류');
+                }
+            };
+
+            // --- UI 렌더링 및 조작 함수 ---
+            const renderProfiles = () => {
+                profilesListEl.innerHTML = '';
+                if (profiles.length === 0) {
+                    profilesListEl.innerHTML = `<p class="text-gray-400 text-center py-4">저장된 프로필이 없습니다. 새 프로필을 추가하세요.</p>`;
+                    return;
+                }
+                profiles.forEach(profile => {
+                    const profileEl = document.createElement('div');
+                    profileEl.className = 'flex items-center p-3 border border-gray-700 rounded-lg hover:bg-gray-700';
+                    const tunnelIndicator = profile.useTunnel ? `<span class="ml-2 text-xs font-medium text-blue-400">(터널)</span>` : '';
+                    profileEl.innerHTML = `
+                        <input type="checkbox" class="h-5 w-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 profile-checkbox" data-id="${profile.id}">
+                        <div class="ml-4 flex-grow">
+                            <p class="font-semibold text-gray-100">${profile.name} ${tunnelIndicator}</p>
+                            <p class="text-sm text-gray-400">${profile.sshInfo} (${profile.authType || 'password'})</p>
+                        </div>
+                        <button class="edit-btn p-2 text-gray-500 hover:text-blue-400" data-id="${profile.id}"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg></button>
+                        <button class="delete-btn p-2 text-gray-500 hover:text-red-400" data-id="${profile.id}"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                    `;
+                    profilesListEl.appendChild(profileEl);
+                });
+            };
+
+            const openModal = (profile = null) => {
+                if (profile) { // 수정 모드
+                    modalTitle.textContent = '프로필 수정';
+                    profileIdInput.value = profile.id;
+                    profileNameInput.value = profile.name;
+                    profileSshInfoInput.value = profile.sshInfo;
+                    profileAuthTypeSelect.value = profile.authType || 'password';
+                    profilePasswordInput.value = profile.password;
+                    profileKeyPathInput.value = profile.privateKeyPath;
+                    profilePathInput.value = profile.path || '';
+                    profileExcludeInput.value = profile.exclude || '';
+                    profileUseTunnelCheckbox.checked = !!profile.useTunnel;
+                    profileTunnelSshInfoInput.value = profile.tunnelSshInfo;
+                    profileTunnelAuthTypeSelect.value = profile.tunnelAuthType || 'password';
+                    profileTunnelPasswordInput.value = profile.tunnelPassword;
+                    profileTunnelKeyPathInput.value = profile.tunnelKeyPath;
+
+                } else { // 추가 모드
+                    modalTitle.textContent = '새 프로필 추가';
+                    [
+                        profileIdInput, profileNameInput, profileSshInfoInput, 
+                        profilePasswordInput, profileKeyPathInput, profilePathInput, 
+                        profileExcludeInput, profileTunnelSshInfoInput,
+                        profileTunnelPasswordInput, profileTunnelKeyPathInput
+                    ].forEach(input => input.value = '');
+                    profileAuthTypeSelect.value = 'password';
+                    profileTunnelAuthTypeSelect.value = 'password';
+                    profileUseTunnelCheckbox.checked = false;
+                }
+                
+                toggleAuthFields(profileAuthTypeSelect, profilePasswordGroup, profileKeyGroup);
+                toggleAuthFields(profileTunnelAuthTypeSelect, profileTunnelPasswordGroup, profileTunnelKeyGroup);
+                profileTunnelOptions.classList.toggle('hidden', !profileUseTunnelCheckbox.checked);
+
+                modal.classList.remove('hidden');
+                setTimeout(() => modal.querySelector('.modal').classList.remove('scale-95', 'opacity-0'), 10);
+            };
+            
+            const closeModal = () => {
+                modal.querySelector('.modal').classList.add('scale-95', 'opacity-0');
+                setTimeout(() => modal.classList.add('hidden'), 300);
+            };
+
+            const toggleAuthFields = (selectEl, passwordGroupEl, keyGroupEl) => {
+                if (selectEl.value === 'key') {
+                    passwordGroupEl.classList.add('hidden');
+                    keyGroupEl.classList.remove('hidden');
+                } else {
+                    passwordGroupEl.classList.remove('hidden');
+                    keyGroupEl.classList.add('hidden');
+                }
+            };
+            
+            const createAccordionItem = (id, name) => {
+                const accordionItem = document.createElement('div');
+                accordionItem.className = 'border border-gray-700 rounded-lg overflow-hidden';
+                
+                accordionItem.innerHTML = `
+                    <div class="accordion-header-container flex justify-between items-center w-full p-4 bg-gray-700 hover:bg-gray-600" data-id="${id}">
+                        <span class="font-semibold text-gray-100 accordion-toggle-btn cursor-pointer flex-grow" title="내용 펼치기/접기">${name}</span>
+                        <div class="flex items-center space-x-2 ml-4">
+                            <span class="status-badge text-sm font-medium text-gray-400">대기중...</span>
+                            <button class="edit-item-name-btn p-1 text-gray-500 hover:text-blue-400 rounded-full" data-id="${id}" title="이름 편집">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg>
+                            </button>
+                            <button class="delete-item-btn p-1 text-gray-500 hover:text-red-400 rounded-full" data-id="${id}" title="항목 삭제">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <textarea class="accordion-content w-full h-96 p-4 bg-gray-900 text-white rounded-b-md overflow-auto custom-scrollbar font-mono text-sm" data-id="${id}" spellcheck="false" style="display: none;"></textarea>
+                `;
+                outputAccordionContainer.appendChild(accordionItem);
+                
+                accordionItem.querySelector('.accordion-toggle-btn').addEventListener('click', () => {
+                    const content = accordionItem.querySelector('.accordion-content');
+                    content.style.display = content.style.display === 'none' ? 'block' : 'none';
+                });
+                return accordionItem;
+            };
+
+            const addTemplateItem = () => {
+                const templateId = 'template_item_01'; // 고유 ID
+                const templateItem = createAccordionItem(templateId, '초기 템플릿 (편집 가능)');
+                const templateTextarea = templateItem.querySelector('.accordion-content');
+                
+                templateTextarea.value = templateContentEl.value;
+                templateTextarea.style.display = 'block';
+                updateAccordionHeader(templateId, '편집 가능', 'text-purple-400');
+                return templateItem;
+            };
+
+            const updateAccordionHeader = (id, statusText, statusClass) => {
+                const header = outputAccordionContainer.querySelector(`.accordion-header-container[data-id="${id}"]`);
+                if (header) {
+                    const badge = header.querySelector('.status-badge');
+                    badge.textContent = statusText;
+                    badge.className = `status-badge text-sm font-medium ${statusClass || 'text-gray-400'}`;
+                }
+            };
+
+            const handleWebSocketMessage = (event) => {
+                const msg = JSON.parse(event.data);
+                let accordionItem;
+                let textareaEl; 
+
+                switch (msg.type) {
+                    case 'start':
+                        accordionItem = createAccordionItem(msg.profileId, msg.profileName);
+                        updateAccordionHeader(msg.profileId, '실행 중...', 'text-blue-400');
+                        accordionItem.querySelector('.accordion-content').style.display = 'block';
+                        break;
+                    
+                    case 'data':
+                        textareaEl = outputAccordionContainer.querySelector(`.accordion-content[data-id="${msg.profileId}"]`);
+                        if (textareaEl) {
+                            textareaEl.value += msg.chunk;
+                            textareaEl.scrollTop = textareaEl.scrollHeight;
+                        }
+                        break;
+                        
+                    case 'done':
+                        updateAccordionHeader(msg.profileId, '완료', 'text-green-400');
+                        break;
+                        
+                    case 'error':
+                        updateAccordionHeader(msg.profileId, '오류', 'text-red-400');
+                        textareaEl = outputAccordionContainer.querySelector(`.accordion-content[data-id="${msg.profileId}"]`);
+                        if (textareaEl) {
+                            textareaEl.value += `\n--- [오류] ---\n${msg.message}\n`;
+                            textareaEl.scrollTop = textareaEl.scrollHeight;
+                        }
+                        break;
+                    
+                    case 'system-error':
+                        showAlert(msg.message, '시스템 오류');
+                        executeBtn.disabled = false;
+                        executeBtn.textContent = '일괄 가져오기';
+                        break;
+                    
+                    case 'system-done':
+                        executeBtn.disabled = false;
+                        executeBtn.textContent = '일괄 가져오기';
+                        console.log('모든 작업이 서버에서 완료되었습니다.');
+                        break;
+                }
+            };
+
+            const handleSaveProfile = async () => {
+                const profileData = {
+                    id: profileIdInput.value || `profile_${Date.now()}`,
+                    name: profileNameInput.value.trim(),
+                    sshInfo: profileSshInfoInput.value.trim(),
+                    authType: profileAuthTypeSelect.value,
+                    password: profilePasswordInput.value.trim(),
+                    privateKeyPath: profileKeyPathInput.value.trim(),
+                    path: profilePathInput.value.trim(),
+                    exclude: profileExcludeInput.value.trim(),
+                    useTunnel: profileUseTunnelCheckbox.checked,
+                    tunnelSshInfo: profileTunnelSshInfoInput.value.trim(),
+                    tunnelAuthType: profileTunnelAuthTypeSelect.value,
+                    tunnelPassword: profileTunnelPasswordInput.value.trim(),
+                    tunnelKeyPath: profileTunnelKeyPathInput.value.trim()
+                };
+                
+                if (!profileData.name || !profileData.sshInfo) {
+                    showAlert('프로필 이름과 대상 SSH 정보는 필수입니다.');
+                    return;
+                }
+                
+                const existingIndex = profiles.findIndex(p => p.id === profileData.id);
+                if (existingIndex > -1) {
+                    profiles[existingIndex] = profileData;
+                } else {
+                    profiles.push(profileData);
+                }
+                
+                await saveProfiles();
+                renderProfiles();
+                closeModal();
+            };
+
+            const handleDeleteProfile = async (id) => {
+                showAlert('정말로 이 프로필을 삭제하시겠습니까?', '삭제 확인');
+                
+                const tempDeleteHandler = async () => {
+                    profiles = profiles.filter(p => p.id !== id);
+                    await saveProfiles();
+                    renderProfiles();
+                    closeAlert();
+                    alertOkBtn.removeEventListener('click', tempDeleteHandler);
+                    alertOkBtn.addEventListener('click', closeAlert);
+                };
+                
+                alertOkBtn.removeEventListener('click', closeAlert);
+                alertOkBtn.addEventListener('click', tempDeleteHandler);
+            };
+            
+            const handleExecute = () => {
+                const checkedCheckboxes = profilesListEl.querySelectorAll('input.profile-checkbox:checked');
+                if (checkedCheckboxes.length === 0) {
+                    showAlert('가져올 프로필을 하나 이상 선택해주세요.');
+                    return;
+                }
+                
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    showAlert('WebSocket이 연결되지 않았습니다. 잠시 후 다시 시도해주세요.', '오류');
+                    return;
+                }
+
+                const selectedIds = Array.from(checkedCheckboxes).map(cb => cb.dataset.id);
+                const selectedProfiles = profiles.filter(p => selectedIds.includes(p.id));
+                
+                executeBtn.disabled = true;
+                executeBtn.textContent = '실행 중...';
+
+                outputAccordionContainer.innerHTML = '';
+                addTemplateItem();
+
+                ws.send(JSON.stringify({
+                    type: 'execute',
+                    profiles: selectedProfiles
+                }));
+            };
+
+            const handleSaveTemplate = async () => {
+                try {
+                    const response = await fetch('/api/template', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ template: templateContentEl.value })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.message || '템플릿 저장 실패');
+                    showAlert('템플릿이 성공적으로 저장되었습니다.');
+                } catch (error) {
+                    console.error(error);
+                    showAlert(`오류 발생: ${error.message}`, '오류');
+                }
+            };
+            
+            const handleClear = () => {
+                showAlert('정말로 결과창을 초기화하시겠습니까? (모든 항목이 삭제되고 템플릿 항목이 추가됩니다)', '초기화 확인');
+                
+                const tempClearHandler = () => {
+                    outputAccordionContainer.innerHTML = '';
+                    addTemplateItem();
+                    closeAlert();
+                    alertOkBtn.removeEventListener('click', tempClearHandler);
+                    alertOkBtn.addEventListener('click', closeAlert);
+                };
+
+                alertOkBtn.removeEventListener('click', closeAlert);
+                alertOkBtn.addEventListener('click', tempClearHandler);
+            };
+
+            const handleAddCustomItem = () => {
+                const id = `custom_item_${Date.now()}`;
+                const name = "임의 추가 항목 (편집 가능)";
+                const customItem = createAccordionItem(id, name);
+                
+                const textarea = customItem.querySelector('.accordion-content');
+                textarea.style.display = 'block';
+                textarea.focus(); 
+                
+                updateAccordionHeader(id, '편집 중', 'text-purple-400');
+            };
+
+            const handleDownload = () => {
+                const textareas = outputAccordionContainer.querySelectorAll('.accordion-content');
+                if (textareas.length === 0) {
+                    showAlert('다운로드할 내용이 없습니다.');
+                    return;
+                }
+                
+                let combinedContent = "";
+                
+                textareas.forEach((textarea, index) => {
+                    const header = outputAccordionContainer.querySelector(`.accordion-header-container[data-id="${textarea.dataset.id}"]`);
+                    const profileName = header ? header.querySelector('.accordion-toggle-btn').textContent : `Profile ${textarea.dataset.id}`;
+                    const status = header ? header.querySelector('.status-badge').textContent : 'N/A';
+                    
+                    if (index > 0) {
+                        combinedContent += `\n==================================================\n`;
+                        combinedContent += `[PROFILE] ${profileName} [STATUS] ${status}\n`;
+                        combinedContent += `==================================================\n\n`;
+                    } else {
+                        combinedContent += `### ${profileName} ###\n\n`;
+                    }
+
+                    combinedContent += `${textarea.value}\n\n`;
+                });
+
+                const blob = new Blob([combinedContent], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ssh_viewer_output_${new Date().toISOString().slice(0,10)}.txt`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            // --- 이벤트 리스너 등록 ---
+            addProfileBtn.addEventListener('click', () => openModal());
+            saveProfileBtn.addEventListener('click', handleSaveProfile);
+            cancelModalBtn.addEventListener('click', closeModal);
+            executeBtn.addEventListener('click', handleExecute);
+            saveTemplateBtn.addEventListener('click', handleSaveTemplate);
+            clearBtn.addEventListener('click', handleClear);
+            downloadBtn.addEventListener('click', handleDownload);
+            addCustomItemBtn.addEventListener('click', handleAddCustomItem);
+
+            profilesListEl.addEventListener('click', (e) => {
+                const button = e.target.closest('button');
+                if (!button) return;
+                const id = button.dataset.id;
+                if (button.classList.contains('delete-btn')) { handleDeleteProfile(id); }
+                if (button.classList.contains('edit-btn')) {
+                    const profileToEdit = profiles.find(p => p.id === id);
+                    if (profileToEdit) openModal(profileToEdit);
+                }
+            });
+
+            outputAccordionContainer.addEventListener('click', (e) => {
+                const button = e.target.closest('button');
+                if (!button) return;
+
+                if (button.classList.contains('delete-item-btn')) {
+                    e.stopPropagation();
+                    const itemToRemove = button.closest('.border.rounded-lg.overflow-hidden');
+                    if (itemToRemove) {
+                        itemToRemove.remove();
+                    }
+                    return; 
+                }
+                
+                if (button.classList.contains('edit-item-name-btn')) {
+                    e.stopPropagation();
+                    const headerContainer = button.closest('.accordion-header-container');
+                    const nameSpan = headerContainer.querySelector('.accordion-toggle-btn');
+                    if (!nameSpan) return;
+                    
+                    if (headerContainer.querySelector('input.edit-name-input')) return;
+
+                    const currentName = nameSpan.textContent;
+                    
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = currentName;
+                    input.className = 'edit-name-input font-semibold text-gray-100 bg-gray-600 flex-grow p-0 m-0 border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500';
+                    input.style.maxWidth = 'calc(100% - 100px)';
+                    
+                    nameSpan.parentNode.replaceChild(input, nameSpan);
+                    input.focus();
+                    input.select();
+
+                    const saveName = () => {
+                        const newName = input.value.trim() || 'Untitled';
+                        nameSpan.textContent = newName;
+                        if (input.parentNode) {
+                            input.parentNode.replaceChild(nameSpan, input);
+                        }
+                    };
+
+                    input.addEventListener('blur', saveName);
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            saveName();
+                        } else if (e.key === 'Escape') {
+                            nameSpan.textContent = currentName;
+                            if (input.parentNode) {
+                                input.parentNode.replaceChild(nameSpan, input);
+                            }
+                        }
+                    });
+                }
+            });
+
+            selectAllCheckbox.addEventListener('change', (e) => {
+                const isChecked = e.target.checked;
+                profilesListEl.querySelectorAll('input.profile-checkbox').forEach(cb => {
+                    cb.checked = isChecked;
+                });
+            });
+
+            profileAuthTypeSelect.addEventListener('change', () => toggleAuthFields(profileAuthTypeSelect, profilePasswordGroup, profileKeyGroup));
+            profileTunnelAuthTypeSelect.addEventListener('change', () => toggleAuthFields(profileTunnelAuthTypeSelect, profileTunnelPasswordGroup, profileTunnelKeyGroup));
+            
+            profileUseTunnelCheckbox.addEventListener('change', (e) => {
+                profileTunnelOptions.classList.toggle('hidden', !e.target.checked);
+            });
+
+
+            // --- 초기화 실행 ---
+            executeBtn.disabled = true;
+            fetchProfiles();
+            fetchTemplate();
+            initWebSocket();
+        });
+    </script>
+</body>
+</html>
+

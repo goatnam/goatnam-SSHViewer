@@ -1,0 +1,21 @@
+{
+  "name": "ssh-remote-viewer",
+  "version": "1.0.0",
+  "description": "A tool to view remote files via SSH in a web interface.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "ssh",
+    "viewer",
+    "remote"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2",
+    "ssh2-promise": "^1.0.0",
+    "ws": "^8.18.3"
+  }
+}
